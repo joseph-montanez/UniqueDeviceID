@@ -7,13 +7,19 @@ import org.json.JSONArray;
 import org.json.JSONException;
 
 import android.Manifest;
+import android.annotation.SuppressLint;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.provider.Settings.Secure;
 import android.telephony.TelephonyManager;
 import android.util.Log;
 
 import java.lang.reflect.Method;
+import java.security.KeyStore;
+import java.util.UUID;
+
+import static android.content.Context.MODE_PRIVATE;
 
 public class UniqueDeviceID extends CordovaPlugin {
 
@@ -52,32 +58,51 @@ public class UniqueDeviceID extends CordovaPlugin {
         }
     }
 
+    @SuppressLint("MissingPermission")
     protected void getDeviceId(){
+        boolean isAndroid10OrGreater = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q;
+
+        Log.i(TAG, "UUID - " + (isAndroid10OrGreater ? "Is Android 10+" : "Is Android 9-" ));
+
         try {
             Context context = cordova.getActivity().getApplicationContext();
             TelephonyManager tm = (TelephonyManager) context.getSystemService(Context.TELEPHONY_SERVICE);
 
             String uuid;
             String androidID = Secure.getString(context.getContentResolver(), Secure.ANDROID_ID);
-            String deviceID = tm.getDeviceId();
-            String simID = tm.getSimSerialNumber();
+            String deviceID;
+            String simID;
 
             if ("9774d56d682e549c".equals(androidID) || androidID == null) {
                 androidID = "";
             }
 
-            if (deviceID == null) {
-                deviceID = "";
+            if (isAndroid10OrGreater) {
+                SharedPreferences preferences = context.getSharedPreferences("UniqueDeviceID", MODE_PRIVATE);
+
+                if (!preferences.contains("device-uuid")) {
+                    SharedPreferences.Editor editor = preferences.edit();
+                    editor.putString("device-uuid", UUID.randomUUID().toString());
+                    editor.apply();
+                }
+
+                uuid = preferences.getString("device-uuid", UUID.randomUUID().toString());
+            } else {
+                deviceID = tm.getDeviceId();
+                simID = tm.getSimSerialNumber();
+                if (deviceID == null) {
+                    deviceID = "";
+                }
+                if (simID == null) {
+                    simID = "";
+                }
+                uuid = androidID + deviceID + simID;
+                uuid = String.format("%32s", uuid).replace(' ', '0');
+                uuid = uuid.substring(0, 32);
+                uuid = uuid.replaceAll("(\\w{8})(\\w{4})(\\w{4})(\\w{4})(\\w{12})", "$1-$2-$3-$4-$5");
             }
 
-            if (simID == null) {
-                simID = "";
-            }
-
-            uuid = androidID + deviceID + simID;
-            uuid = String.format("%32s", uuid).replace(' ', '0');
-            uuid = uuid.substring(0, 32);
-            uuid = uuid.replaceAll("(\\w{8})(\\w{4})(\\w{4})(\\w{4})(\\w{12})", "$1-$2-$3-$4-$5");
+            Log.i(TAG, "UUID - " + uuid);
 
             this.callbackContext.success(uuid);
         }catch(Exception e ) {
